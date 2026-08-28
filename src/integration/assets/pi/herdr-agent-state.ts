@@ -185,6 +185,7 @@ export default function (pi) {
   let lastState: AgentState | undefined;
   let lastMessage: string | undefined;
   let rootSession = false;
+  let statePublishingReady = false;
 
   function desiredState() {
     if (blockedCount > 0) {
@@ -200,6 +201,9 @@ export default function (pi) {
   }
 
   function publishState(force = false) {
+    if (!statePublishingReady) {
+      return;
+    }
     const next = desiredState();
     if (!force && next.state === lastState && next.message === lastMessage) {
       return;
@@ -230,6 +234,7 @@ export default function (pi) {
   pi.events.on("herdr:busy", (data) => {
     // sibling extensions can replay busy state before session_start during reload.
     if (!data?.active) {
+      // inactive events have no sibling identity, so retain the count but discard the label.
       busyCount = Math.max(0, busyCount - 1);
       busyMessage = undefined;
       if (rootSession) {
@@ -252,8 +257,11 @@ export default function (pi) {
       return;
     }
     rootSession = true;
+    statePublishingReady = false;
     updateSessionRef(ctx);
     await reportSession(event?.reason);
+    // state reports must not target the replacement session before registration is acknowledged.
+    statePublishingReady = true;
     // A reload can replace this extension mid-run without emitting another agent_start.
     agentActive = ctx?.isIdle?.() === false;
     publishState(true);

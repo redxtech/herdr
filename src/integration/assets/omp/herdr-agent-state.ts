@@ -248,6 +248,8 @@ export default function (pi) {
   let failureBlocked = false;
   let failureMessage: string | undefined;
   let blockedCount = 0;
+  let busyCount = 0;
+  let busyMessage: string | undefined;
   let blockedMessage: string | undefined;
   let lastState: AgentState | undefined;
   let lastMessage: string | undefined;
@@ -283,6 +285,9 @@ export default function (pi) {
     }
     if (agentActive || retryHoldActive) {
       return { state: "working" as const, message: undefined };
+    }
+    if (busyCount > 0) {
+      return { state: "working" as const, message: busyMessage };
     }
     return { state: "idle" as const, message: undefined };
   }
@@ -366,6 +371,29 @@ export default function (pi) {
     }
 
     activateBlocked(data.label);
+  });
+
+  pi.events.on("herdr:busy", (data) => {
+    // sibling extensions can replay busy state before session_start during reload.
+    if (!data?.active) {
+      // inactive events have no sibling identity, so retain the count but discard the label.
+      busyCount = Math.max(0, busyCount - 1);
+      busyMessage = undefined;
+      if (rootSession) {
+        if (busyCount === 0 && desiredState().state === "idle") {
+          scheduleIdle();
+        } else {
+          publishState();
+        }
+      }
+      return;
+    }
+
+    busyCount += 1;
+    busyMessage = data.label;
+    if (rootSession) {
+      publishState();
+    }
   });
 
   pi.on("session_start", (_event, ctx) => {
